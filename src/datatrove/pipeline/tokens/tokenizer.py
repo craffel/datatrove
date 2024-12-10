@@ -271,6 +271,7 @@ class DocumentTokenizer(PipelineStepWithTokenizer):
         upload_block_size (int | None): the fsspec size of the upload block for remote filesystems (S3)
             You can set this if your s3 uploads are failing because of "Part number must be an integer between 1 and 10000, inclusive".
             Example: 20 * 2**20 (20MB)
+        window_size (int | None): whether and how big to chop up documents into windows (default: None means don't chop).
     """
 
     name = "✍️ Writer"
@@ -292,6 +293,7 @@ class DocumentTokenizer(PipelineStepWithTokenizer):
         upload_block_size: int | None = None,
         # you can set this if your s3 uploads are failing because of "Part
         # number must be an integer between 1 and 10000, inclusive". Example: 20 * 2**20 (20MB)
+        window_size: int | None = None,
     ):
         super().__init__()
         self.output_folder = get_datafolder(output_folder)
@@ -312,6 +314,7 @@ class DocumentTokenizer(PipelineStepWithTokenizer):
         self.save_final_metadata = save_final_metadata
         self.upload_block_size = upload_block_size
         self.max_tokens_per_file = max_tokens_per_file
+        self.window_size = window_size
 
     def get_loss_values(self, document: Document, encoded: "Encoding"):
         """Get the loss mask for the document, if needed.
@@ -365,6 +368,14 @@ class DocumentTokenizer(PipelineStepWithTokenizer):
                     if loss_values is not None and len(loss_values) < len(tokens):
                         # crop final section without loss
                         tokens = tokens[: len(loss_values)]
+                    if self.window_size:
+                        # chop up into chunks of size self.window_size
+                        start = 0
+                        while start < len(tokens):
+                            window_tokens = tokens[start:start + self.window_size]
+                            window_loss_values = loss_values or loss_values[start:start + self.window_size]
+                            unshuff.write(window_tokens, window_loss_values)
+                            start += self.window_size
                     # write bytes to disk
                     unshuff.write(tokens, loss_values)
                     # save stats
